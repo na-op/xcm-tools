@@ -1,12 +1,12 @@
 import type { TAsset, TAssetInfo } from '@paraspell/assets'
-import { isAssetEqual } from '@paraspell/assets'
+import { isAssetEqual, normalizeLocation } from '@paraspell/assets'
 import type { TLocation } from '@paraspell/sdk-common'
-import { isTLocation } from '@paraspell/sdk-common'
+import { isTLocation, Version } from '@paraspell/sdk-common'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { PolkadotApi } from '../../api'
 import type { TSubstrateTransferOptions } from '../../types'
-import { abstractDecimals, createAsset, sortAssets } from '../../utils'
+import { abstractDecimals, createAsset, pickCompatibleXcmVersion, sortAssets } from '../../utils'
 import { resolveOverriddenAsset } from './resolveOverriddenAsset'
 import { validateAssetSupport } from './validateAssetSupport'
 
@@ -16,6 +16,7 @@ vi.mock('./validateAssetSupport')
 vi.mock('@paraspell/sdk-common')
 vi.mock('@paraspell/assets', () => ({
   isAssetEqual: vi.fn(),
+  normalizeLocation: vi.fn((location: unknown) => location),
   extractAssetLocation: vi.fn().mockResolvedValue({}),
   InvalidCurrencyError: class extends Error {}
 }))
@@ -37,6 +38,8 @@ describe('resolveOverriddenAsset', () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
+    vi.mocked(pickCompatibleXcmVersion).mockReturnValue(Version.V4)
+    vi.mocked(normalizeLocation).mockImplementation(location => location)
     vi.mocked(isTLocation).mockReturnValue(false)
     vi.mocked(createAsset).mockReturnValue({} as TAsset)
     vi.spyOn(mockApi, 'findAssetInfo').mockReturnValue({
@@ -96,5 +99,30 @@ describe('resolveOverriddenAsset', () => {
 
     const result = resolveOverriddenAsset(options, false, false, {} as TAssetInfo)
     expect(result).toBeUndefined()
+  })
+
+  it('uses pickCompatibleXcmVersion and normalizes each overridden asset location', () => {
+    const rawLoc = { parents: 1, interior: { X1: [{ Parachain: 1000 }] } } as unknown as TLocation
+    const normLoc = { parents: 1, interior: { X1: { Parachain: 1000 } } } as unknown as TLocation
+    vi.mocked(pickCompatibleXcmVersion).mockReturnValue(Version.V3)
+    vi.mocked(normalizeLocation).mockReturnValue(normLoc)
+    vi.spyOn(mockApi, 'findAssetInfo').mockReturnValue({ location: rawLoc } as TAssetInfo)
+    vi.mocked(isAssetEqual).mockReturnValue(true)
+
+    resolveOverriddenAsset(
+      {
+        ...defaultOptions,
+        version: Version.V3,
+        currency: [{ symbol: 'ASSET1', amount: 1000n }],
+        feeAsset: { symbol: 'ASSET1' }
+      },
+      false,
+      true,
+      { symbol: 'ASSET1', location: rawLoc } as TAssetInfo
+    )
+
+    expect(pickCompatibleXcmVersion).toHaveBeenCalledWith(mockApi, mockOrigin, mockDestination, Version.V3)
+    expect(normalizeLocation).toHaveBeenCalledWith(rawLoc, Version.V3)
+    expect(createAsset).toHaveBeenCalledWith(Version.V3, 1000n, normLoc)
   })
 })

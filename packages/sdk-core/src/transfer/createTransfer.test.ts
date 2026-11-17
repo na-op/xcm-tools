@@ -336,4 +336,30 @@ describe('send', () => {
       })
     )
   })
+
+  it('should normalize feeAsset location to resolvedVersion when present', async () => {
+    const feeLoc = { parents: 1, interior: { X1: [{ Parachain: 1000 }] } }
+    const normalizedFeeLoc = { parents: 1, interior: { X1: { Parachain: 1000 } } }
+    vi.mocked(pickCompatibleXcmVersion).mockReturnValue(Version.V3)
+    vi.mocked(resolveFeeAsset).mockReturnValue({ symbol: 'FEE', location: feeLoc } as unknown as TAssetInfo)
+    vi.mocked(normalizeLocation).mockImplementation(loc => (loc === feeLoc ? (normalizedFeeLoc as never) : loc))
+
+    const transferSpy = vi.spyOn(originChainMock, 'transfer')
+    await createTransfer({
+      api: apiMock,
+      from: 'Acala',
+      to: 'Astar',
+      currency: { symbol: 'TEST', amount: '100' },
+      feeAsset: { symbol: 'FEE' },
+      version: Version.V3,
+      recipient: 'some-address'
+    } as TSubstrateTransferOptions<unknown, unknown, unknown>)
+
+    expect(normalizeLocation).toHaveBeenCalledWith(feeLoc, Version.V3)
+    expect(transferSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feeAsset: expect.objectContaining({ location: normalizedFeeLoc })
+      })
+    )
+  })
 })

@@ -407,4 +407,39 @@ describe('handleExecuteTransfer', () => {
       })
     )
   })
+
+  it('disconnects destApi when resolveEdDeposit rejects', async () => {
+    const disconnectSpy = vi.spyOn(mockApi, 'disconnect')
+    vi.mocked(resolveEdDeposit).mockRejectedValueOnce(new Error('ed lookup failed'))
+
+    await expect(
+      handleExecuteTransfer({
+        ...mockInput,
+        sender: '0xvalid',
+        assetInfo: { ...mockInput.assetInfo, amount: 10000n }
+      })
+    ).rejects.toThrow('ed lookup failed')
+
+    expect(disconnectSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('validates originFee + reserveFee when feeAssetInfo equals assetInfo', async () => {
+    vi.mocked(isAssetEqual).mockReturnValue(true)
+    vi.mocked(createDirectExecuteXcm).mockResolvedValue(mockXcm)
+    vi.mocked(createExecuteCall).mockReturnValue('finalTx' as unknown as TSerializedExtrinsics)
+    vi.spyOn(mockApi, 'deserializeExtrinsics').mockReturnValue('mockTx')
+    vi.mocked(dryRunInternal).mockResolvedValue({
+      origin: { success: true, fee: 1000n },
+      hops: [{ chain: 'Intermediate', result: { success: true, fee: 1000n } }]
+    } as unknown as TDryRunResult)
+
+    await expect(
+      handleExecuteTransfer({
+        ...mockInput,
+        sender: '0xvalid',
+        assetInfo: { ...mockInput.assetInfo, amount: 2000n },
+        feeAssetInfo: { ...mockInput.assetInfo }
+      })
+    ).rejects.toThrow(AmountTooLowError)
+  })
 })
